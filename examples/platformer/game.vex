@@ -1,0 +1,225 @@
+// examples/platformer/game.vex
+// Simple 2D Platformer Game in Vex
+
+import { useState, useEffect, useRef } from "@xengine/core"
+import { Sprite, RigidBody2D, Audio, Input } from "@xengine/core"
+
+const WINDOW_WIDTH = 1280
+const WINDOW_HEIGHT = 720
+const PLAYER_SPEED = 300
+const JUMP_FORCE = 500
+const GRAVITY = -980
+
+component Player({ onCollision }) {
+    const [position, setPosition] = useState({ x: 100, y: 100 })
+    const [velocity, setVelocity] = useState({ x: 0, y: 0 })
+    const [isGrounded, setIsGrounded] = useState(false)
+    const [flipX, setFlipX] = useState(false)
+    const [health, setHealth] = useState(100)
+    
+    useEffect(() => {
+        const handleInput = () => {
+            let vx = 0
+            
+            if (Input.isKeyPressed("ArrowLeft") || Input.isKeyPressed("a")) {
+                vx = -PLAYER_SPEED
+                setFlipX(true)
+            } else if (Input.isKeyPressed("ArrowRight") || Input.isKeyPressed("d")) {
+                vx = PLAYER_SPEED
+                setFlipX(false)
+            }
+            
+            if ((Input.isKeyJustPressed("Space") || Input.isKeyJustPressed("w")) && isGrounded) {
+                setVelocity(v => ({ ...v, y: JUMP_FORCE }))
+                Audio.playSound("assets/jump.wav")
+            }
+            
+            setVelocity(v => ({ x: vx, y: v.y }))
+        }
+        
+        const updatePhysics = (deltaTime) => {
+            setVelocity(v => ({
+                x: v.x,
+                y: v.y + GRAVITY * deltaTime
+            }))
+            
+            setPosition(p => ({
+                x: p.x + velocity.x * deltaTime,
+                y: p.y + velocity.y * deltaTime
+            }))
+        }
+        
+        const gameLoop = setInterval(() => {
+            const deltaTime = 1 / 60
+            handleInput()
+            updatePhysics(deltaTime)
+        }, 1000 / 60)
+        
+        return () => clearInterval(gameLoop)
+    }, [velocity, isGrounded])
+    
+    render =>
+        <Sprite
+            src="assets/player.png"
+            x={position.x}
+            y={position.y}
+            width={64}
+            height={64}
+            flipX={flipX}
+        />
+}
+
+component Enemy({ startX, startY, endX }) {
+    const [position, setPosition] = useState({ x: startX, y: startY })
+    const [direction, setDirection] = useState(1)
+    const speed = 100
+    
+    useEffect(() => {
+        const patrol = setInterval(() => {
+            setPosition(p => {
+                let newX = p.x + direction * speed * (1 / 60)
+                let newDir = direction
+                
+                if (newX >= endX) {
+                    newDir = -1
+                    newX = endX
+                } else if (newX <= startX) {
+                    newDir = 1
+                    newX = startX
+                }
+                
+                if (newDir !== direction) {
+                    setDirection(newDir)
+                }
+                
+                return { x: newX, y: p.y }
+            })
+        }, 1000 / 60)
+        
+        return () => clearInterval(patrol)
+    }, [direction])
+    
+    render =>
+        <Sprite
+            src="assets/enemy.png"
+            x={position.x}
+            y={position.y}
+            width={48}
+            height={48}
+            flipX={direction < 0}
+        />
+}
+
+component Coin({ x, y, onCollect }) {
+    const [collected, setCollected] = useState(false)
+    
+    const handleCollect = () => {
+        if (!collected) {
+            setCollected(true)
+            Audio.playSound("assets/coin.wav")
+            onCollect()
+        }
+    }
+    
+    render =>
+        unless(collected) {
+            <Sprite
+                src="assets/coin.png"
+                x={x}
+                y={y}
+                width={32}
+                height={32}
+                onCollision={handleCollect}
+            />
+        }
+}
+
+component UI({ score, health }) {
+    render =>
+        <div style={{ position: "absolute", top: 20, left: 20, color: "white" }}>
+            <h2>Score: {score}</h2>
+            <h2 style={{ color: health > 30 ? "white" : "red" }}>
+                Health: {health}
+            </h2>
+        </div>
+}
+
+component Game() {
+    const [score, setScore] = useState(0)
+    const [health, setHealth] = useState(100)
+    const [gameOver, setGameOver] = useState(false)
+    
+    useEffect(() => {
+        // Load assets
+        Audio.loadSound("assets/jump.wav")
+        Audio.loadSound("assets/coin.wav")
+        Audio.loadSound("assets/hit.wav")
+        Audio.loadMusic("assets/background_music.ogg")
+        
+        // Play background music
+        Audio.playMusic("assets/background_music.ogg", { loop: true })
+    }, [])
+    
+    const handleCoinCollect = () => {
+        setScore(s => s + 10)
+    }
+    
+    const handlePlayerHit = () => {
+        setHealth(h => {
+            const newHealth = h - 10
+            if (newHealth <= 0) {
+                setGameOver(true)
+            }
+            return newHealth
+        })
+        Audio.playSound("assets/hit.wav")
+    }
+    
+    render =>
+        <GameCanvas width={WINDOW_WIDTH} height={WINDOW_HEIGHT}>
+            {/* Background */}
+            <Sprite src="assets/background.png" x={0} y={0} />
+            
+            {/* Platform */}
+            <Sprite src="assets/platform.png" x={0} y={-200} />
+            
+            {/* Coins */}
+            <Coin x={200} y={100} onCollect={handleCoinCollect} />
+            <Coin x={400} y={150} onCollect={handleCoinCollect} />
+            <Coin x={600} y={100} onCollect={handleCoinCollect} />
+            <Coin x={800} y={200} onCollect={handleCoinCollect} />
+            <Coin x={1000} y={150} onCollect={handleCoinCollect} />
+            
+            {/* Enemies */}
+            <Enemy startX={300} startY={0} endX={500} />
+            <Enemy startX={700} startY={0} endX={900} />
+            <Enemy startX={1100} startY={0} endX={1200} />
+            
+            {/* Player */}
+            <Player onCollision={handlePlayerHit} />
+            
+            {/* UI */}
+            <UI score={score} health={health} />
+            
+            {/* Game Over Screen */}
+            {gameOver && (
+                <div style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    textAlign: "center",
+                    color: "white",
+                    fontSize: "48px"
+                }}>
+                    <h1>Game Over!</h1>
+                    <p>Final Score: {score}</p>
+                    <button onClick={() => window.location.reload()}>
+                        Play Again
+                    </button>
+                </div>
+            )}
+        </GameCanvas>
+}
+
+export default Game
