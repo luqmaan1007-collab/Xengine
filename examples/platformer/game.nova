@@ -1,0 +1,276 @@
+// examples/platformer/game.nova
+// Simple 2D Platformer Game in Nova
+
+program Platformer
+
+import xengine.core
+import xengine.graphics
+import xengine.physics
+import xengine.input
+import xengine.audio
+
+// Game constants
+const WINDOW_WIDTH = 1280
+const WINDOW_HEIGHT = 720
+const GRAVITY = Vec2(0, -980)
+const PLAYER_SPEED = 300
+const JUMP_FORCE = 500
+
+struct Player {
+    sprite: Sprite
+    body: RigidBody2D
+    position: Vec2
+    velocity: Vec2
+    isGrounded: bool
+    health: int
+    score: int
+}
+
+struct Enemy {
+    sprite: Sprite
+    body: RigidBody2D
+    position: Vec2
+    patrolStart: Vec2
+    patrolEnd: Vec2
+    speed: float
+}
+
+struct Coin {
+    sprite: Sprite
+    position: Vec2
+    collected: bool
+}
+
+fn createPlayer(engine: XEngine) -> Player {
+    let sprite = engine.createSprite("assets/player.png")
+    sprite.setSize(64, 64)
+    
+    let body = engine.createRigidBody2D()
+    body.setType(RigidBodyType.Dynamic)
+    body.addBoxCollider(64, 64)
+    body.setFixedRotation(true)
+    
+    return Player {
+        sprite: sprite,
+        body: body,
+        position: Vec2(100, 100),
+        velocity: Vec2(0, 0),
+        isGrounded: false,
+        health: 100,
+        score: 0
+    }
+}
+
+fn createEnemy(engine: XEngine, startX: float, startY: float, endX: float) -> Enemy {
+    let sprite = engine.createSprite("assets/enemy.png")
+    sprite.setSize(48, 48)
+    
+    let body = engine.createRigidBody2D()
+    body.setType(RigidBodyType.Kinematic)
+    body.addBoxCollider(48, 48)
+    
+    return Enemy {
+        sprite: sprite,
+        body: body,
+        position: Vec2(startX, startY),
+        patrolStart: Vec2(startX, startY),
+        patrolEnd: Vec2(endX, startY),
+        speed: 100
+    }
+}
+
+fn createCoin(engine: XEngine, x: float, y: float) -> Coin {
+    let sprite = engine.createSprite("assets/coin.png")
+    sprite.setSize(32, 32)
+    
+    return Coin {
+        sprite: sprite,
+        position: Vec2(x, y),
+        collected: false
+    }
+}
+
+fn updatePlayer(player: &Player, deltaTime: float) {
+    // Handle input
+    if Input.isKeyPressed(KEY_LEFT) || Input.isKeyPressed(KEY_A) {
+        player.velocity.x = -PLAYER_SPEED
+        player.sprite.setFlipX(true)
+    } else if Input.isKeyPressed(KEY_RIGHT) || Input.isKeyPressed(KEY_D) {
+        player.velocity.x = PLAYER_SPEED
+        player.sprite.setFlipX(false)
+    } else {
+        player.velocity.x = 0
+    }
+    
+    // Jump
+    if (Input.isKeyJustPressed(KEY_SPACE) || Input.isKeyJustPressed(KEY_W)) && player.isGrounded {
+        player.velocity.y = JUMP_FORCE
+        Audio.playSound("assets/jump.wav")
+    }
+    
+    // Apply gravity
+    player.velocity.y += GRAVITY.y * deltaTime
+    
+    // Update position
+    player.position.x += player.velocity.x * deltaTime
+    player.position.y += player.velocity.y * deltaTime
+    
+    // Update physics body
+    player.body.setPosition(player.position)
+    player.body.setVelocity(player.velocity)
+    
+    // Update sprite
+    player.sprite.setPosition(player.position)
+}
+
+fn updateEnemy(enemy: &Enemy, deltaTime: float) {
+    // Patrol between start and end points
+    let direction = if enemy.position.x < enemy.patrolEnd.x { 1.0 } else { -1.0 }
+    
+    if enemy.position.x <= enemy.patrolStart.x {
+        direction = 1.0
+    } else if enemy.position.x >= enemy.patrolEnd.x {
+        direction = -1.0
+    }
+    
+    enemy.position.x += direction * enemy.speed * deltaTime
+    enemy.body.setPosition(enemy.position)
+    enemy.sprite.setPosition(enemy.position)
+    enemy.sprite.setFlipX(direction < 0)
+}
+
+fn checkCollisions(player: &Player, enemies: &[Enemy], coins: &[Coin]) {
+    // Check collision with enemies
+    for enemy in enemies {
+        if player.body.overlaps(enemy.body) {
+            player.health -= 10
+            Audio.playSound("assets/hit.wav")
+            
+            if player.health <= 0 {
+                println("Game Over!")
+            }
+        }
+    }
+    
+    // Check collision with coins
+    for coin in coins {
+        if !coin.collected {
+            let distance = Vec2.distance(player.position, coin.position)
+            if distance < 32 {
+                coin.collected = true
+                player.score += 10
+                Audio.playSound("assets/coin.wav")
+            }
+        }
+    }
+}
+
+fn renderGame(engine: XEngine, player: Player, enemies: [Enemy], coins: [Coin]) {
+    engine.clearScreen(Color(0.2, 0.6, 1.0, 1.0))  // Sky blue
+    
+    // Render background
+    engine.drawSprite(engine.getSprite("assets/background.png"), Vec2(0, 0))
+    
+    // Render platforms
+    engine.drawSprite(engine.getSprite("assets/platform.png"), Vec2(0, -200))
+    
+    // Render coins
+    for coin in coins {
+        if !coin.collected {
+            coin.sprite.draw()
+        }
+    }
+    
+    // Render enemies
+    for enemy in enemies {
+        enemy.sprite.draw()
+    }
+    
+    // Render player
+    player.sprite.draw()
+    
+    // Render UI
+    engine.drawText(
+        "Score: " + player.score.toString(),
+        Vec2(20, WINDOW_HEIGHT - 40),
+        32,
+        Color.White
+    )
+    
+    engine.drawText(
+        "Health: " + player.health.toString(),
+        Vec2(20, WINDOW_HEIGHT - 80),
+        32,
+        Color.Red
+    )
+}
+
+fn main() {
+    println("Starting Platformer Game...")
+    
+    // Initialize engine
+    let config = EngineConfig {
+        windowWidth: WINDOW_WIDTH,
+        windowHeight: WINDOW_HEIGHT,
+        windowTitle: "Platformer - Xengine Demo",
+        vsync: true,
+        targetFPS: 60
+    }
+    
+    let engine = XEngine.create(config)
+    
+    // Load assets
+    println("Loading assets...")
+    engine.loadTexture("assets/player.png")
+    engine.loadTexture("assets/enemy.png")
+    engine.loadTexture("assets/coin.png")
+    engine.loadTexture("assets/platform.png")
+    engine.loadTexture("assets/background.png")
+    
+    engine.loadSound("assets/jump.wav")
+    engine.loadSound("assets/coin.wav")
+    engine.loadSound("assets/hit.wav")
+    engine.loadMusic("assets/background_music.ogg")
+    
+    // Play background music
+    Audio.playMusic("assets/background_music.ogg", true)
+    
+    // Create game objects
+    let player = createPlayer(engine)
+    
+    let enemies = [
+        createEnemy(engine, 300, 0, 500),
+        createEnemy(engine, 700, 0, 900),
+        createEnemy(engine, 1100, 0, 1200)
+    ]
+    
+    let coins = [
+        createCoin(engine, 200, 100),
+        createCoin(engine, 400, 150),
+        createCoin(engine, 600, 100),
+        createCoin(engine, 800, 200),
+        createCoin(engine, 1000, 150)
+    ]
+    
+    // Game loop
+    while engine.isRunning() {
+        let deltaTime = engine.getDeltaTime()
+        
+        // Update
+        updatePlayer(&player, deltaTime)
+        
+        for enemy in &enemies {
+            updateEnemy(enemy, deltaTime)
+        }
+        
+        checkCollisions(&player, &enemies, &coins)
+        
+        // Render
+        renderGame(engine, player, enemies, coins)
+        
+        engine.present()
+    }
+    
+    println("Game finished!")
+    engine.shutdown()
+}
